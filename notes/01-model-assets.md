@@ -15,12 +15,16 @@ file /System/Library/ExtensionKit/Extensions/TGOnDeviceInferenceProviderService.
 /System/Library/ExtensionKit/Extensions/TGOnDeviceInferenceProviderService.appex/Contents/MacOS/TGOnDeviceInferenceProviderService (for architecture arm64e):	Mach-O 64-bit executable arm64e
 ```
 
-It seems this service is launched on-demand, running isolated from the calling app, and its lifecycle is tightly tied to local inference requests. I haven’t found documentation for this service, but looking at the files & ports it has access to in the Activity Monitor, I saw a references to the following path `/System/Library/AssetsV2/com_apple_MobileAsset_UAF_FM_GenerativeModels/purpose_auto/fd24bcad75f012120dc856e02f863ba1535c357e.asset/.AssetData/model.bundle/H15S.bundle/lora_16_extend_2048_8/lora_16_extend_2048_8_classic_cpu/model.espresso.weights`. That clearly looks like a model asset, let's look into it ! 🔎
+It seems this service is launched on-demand, running isolated from the calling app, and its lifecycle is tightly tied to local inference requests. I haven’t found documentation for this service, but looking at the files & ports it has access to in the Activity Monitor, I saw a references to the following path `/System/Library/AssetsV2/com_apple_MobileAsset_UAF_FM_GenerativeModels/purpose_auto/fd24bcad75f012120dc856e02f863ba1535c357e.asset/.AssetData/model.bundle/H15S.bundle/lora_16_extend_2048_8/lora_16_extend_2048_8_classic_cpu/model.espresso.weights`.
+
+That clearly looks like a model asset, let's look into it ! 🔎
 
 
 [Me trying to `cd` into the directory ..] Arfffff it's protected !!
 
-To access it, it seems to be required to disable System Integrity Protection (SIP) feature from my Mac (thanks reddit friends: [Apple Intelligence stuck downloading](https://www.reddit.com/r/MacOSBeta/comments/1eqrg3k/apple_intelligence_stuck_downloading_for_over_a/?sort=old). I don't have enought technical background to add anything useful regarding the SIP disablement, but if someone knows more about why it is required and how it works I'll be happy to add details about this here.
+To access it, it seems to be required to disable System Integrity Protection (SIP) feature from my Mac (thanks reddit friends: [Apple Intelligence stuck downloading](https://www.reddit.com/r/MacOSBeta/comments/1eqrg3k/apple_intelligence_stuck_downloading_for_over_a/?sort=old)).
+
+I don't have enought technical background to add anything useful regarding the SIP disablement, but if someone knows more about why it is required and how it works I'll be happy to add details about this here.
 
 ### Asset Packaging and Cryptex
 
@@ -63,7 +67,9 @@ But looking into one of them, I couldn't find any direcory/file that could relat
 ```
 
 Looking at the asset size, it seemed that `UC_FM_LANGUAGE_INSTRUCT_3B_BASE_GENERIC_GENERIC_H15S_Cryptex.dmg` had the highest probability to be something meaningfull. These are disk images, but mounting them using Finder or hdiutil fails.
-After some googling (and discussing with ChatGPT), I found that this disk image are an Apple specific way to ship securely assets in their OS upades (among other things), they have called it `Cryptex` (looking at the file name it couldn't have been more obvious from the start 😅). Using `hdutils` to mount it allowed me to access its content: `hdiutil attach UC_FM_LANGUAGE_INSTRUCT_3B_BASE_GENERIC_GENERIC_H15S_Cryptex.dmg`.
+After some googling (and discussing with ChatGPT), I found that this disk image are an Apple specific way to ship securely assets in their OS upades (among other things), they have called it `Cryptex` (looking at the file name it couldn't have been more obvious from the start 😅).
+
+Using `hdutils` to mount it allowed me to access its content: `hdiutil attach UC_FM_LANGUAGE_INSTRUCT_3B_BASE_GENERIC_GENERIC_H15S_Cryptex.dmg`.
 
 ### Exploring the Model Asset Layout
 
@@ -99,6 +105,8 @@ lora_16_extend_2048_8/
 ```
 
 The content of `model.espresso.net` is text file likely describing the model graph. `model.espresso.shape` is a dictionnary containing informations about model shapes, and `model.espresso.weights` is a large binary file containing model file. Other folders have files like `fragment.mil` (likely a CoreML MIL intermediate graph) and `weights.bin`.
+
+
 Cool ! But these files looked pretty small in term of size with respect to what I've would expect for a 3B model 🤔.
 
 Let's see what they could be used for ..
@@ -134,9 +142,7 @@ Secondly, large transformer models are typically trained for a specific context 
 
 A central artifact in most of the model bundles is an `.hwx` file, for example: `lora_32_prompt_opt_256_64/multiprocedure/model.hwx`. It's a 774MB, which is more realistic for a heavily quantized 3B LLM (more on that later).
 
-This file doesn’t match any public format. Using a hex editor, I see what looks like headers and segment tables that correspond to the structure reverse-engineered by 0xspacer. From public research, .hwx files are compiled binary graphs targeting ANE, baked for a specific Apple Silicon variant, and strictly requiring all tensor shapes to be fixed at compile time.
-
-This file encodes an ANE-executable graph, precompiled for a specific hardware generation (e.g., M3 Pro).
+This file doesn’t match any public format, but from public research, .hwx files are compiled binary graphs targeting ANE, baked for a specific Apple Silicon variant (e.g., M3 Pro).
 
 We have just confirmed another interesting thing ! Apple fundation models are executed on the ANE 🏎️
 
